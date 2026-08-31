@@ -72,18 +72,38 @@ internal static class HeadlessBrowser
         var port = GetFreePort();
         var profileDir = Path.Combine(Path.GetTempPath(), "ImportMapExtension.Test", "browser-" + Guid.NewGuid().ToString("N"));
 
-        using var browser = Process.Start(new ProcessStartInfo(browserPath,
-        [
-            "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-            "--disable-extensions", "--disable-background-networking",
-            $"--user-data-dir={profileDir}", $"--remote-debugging-port={port}", "about:blank",
-        ])
-        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true })
-            ?? throw new InvalidOperationException($"Could not start \"{browserPath}\".");
+        using var browser = new Process
+        {
+            StartInfo = new ProcessStartInfo(browserPath,
+            [
+                "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+                "--disable-extensions", "--disable-background-networking",
+                // Without these two the browser never starts on a continuous integration machine.
+                // Its sandbox needs unprivileged user namespaces, which the AppArmor policy of a
+                // current Ubuntu denies to a browser outside its packaged location, and the "/dev/shm"
+                // of a container is too small for the shared memory it wants. Neither matters for a
+                // browser that is started to look at one local page and is killed afterwards.
+                "--no-sandbox", "--disable-dev-shm-usage",
+                $"--user-data-dir={profileDir}", $"--remote-debugging-port={port}", "about:blank",
+            ])
+            { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true }
+        };
+
+        // Both streams are drained as they arrive. A redirected stream that nobody reads fills its
+        // pipe and blocks the browser, and what it wrote is the only explanation of a browser that
+        // never came up.
+        var diagnostics = new StringBuilder();
+        void Collect(object _, DataReceivedEventArgs e) { if (e.Data is not null) { lock (diagnostics) diagnostics.AppendLine(e.Data); } }
+        browser.OutputDataReceived += Collect;
+        browser.ErrorDataReceived += Collect;
+
+        if (!browser.Start()) throw new InvalidOperationException($"Could not start \"{browserPath}\".");
+        browser.BeginOutputReadLine();
+        browser.BeginErrorReadLine();
 
         try
         {
-            await using var session = await DevToolsSession.ConnectAsync(port);
+            await using var session = await DevToolsSession.ConnectAsync(port, browser, diagnostics);
 
             await session.SendAsync("Log.enable");
             await session.SendAsync("Runtime.enable");
@@ -142,10 +162,10 @@ internal static class HeadlessBrowser
             this._Reading = this.ReadAsync();
         }
 
-        public static async Task<DevToolsSession> ConnectAsync(int port)
+        public static async Task<DevToolsSession> ConnectAsync(int port, Process browser, StringBuilder diagnostics)
         {
             var socket = new ClientWebSocket();
-            await socket.ConnectAsync(new Uri(await FindPageTargetAsync(port)), CancellationToken.None);
+            await socket.ConnectAsync(new Uri(await FindPageTargetAsync(port, browser, diagnostics)), CancellationToken.None);
             return new DevToolsSession(socket);
         }
 
@@ -222,12 +242,20 @@ internal static class HeadlessBrowser
             }
         }
 
-        private static async Task<string> FindPageTargetAsync(int port)
+        private static async Task<string> FindPageTargetAsync(int port, Process browser, StringBuilder diagnostics)
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
 
             for (var attempt = 0; attempt < 150; attempt++)
             {
+                // A browser that refused to start is the common case, and waiting the full thirty
+                // seconds for it hides the reason it gives on the way out.
+                if (browser.HasExited)
+                {
+                    throw new InvalidOperationException(
+                        $"The browser exited with code {browser.ExitCode} before it exposed a debugging target.{Explain(diagnostics)}");
+                }
+
                 try
                 {
                     using var targets = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/list"));
@@ -240,7 +268,15 @@ internal static class HeadlessBrowser
 
                 await Task.Delay(200);
             }
-            throw new InvalidOperationException("The browser never exposed a debugging target.");
+            throw new InvalidOperationException($"The browser never exposed a debugging target.{Explain(diagnostics)}");
+        }
+
+        private static string Explain(StringBuilder diagnostics)
+        {
+            lock (diagnostics)
+            {
+                return diagnostics.Length == 0 ? " It said nothing about why." : "\nThe browser said:\n" + diagnostics;
+            }
         }
 
         public async ValueTask DisposeAsync()

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="../VersionInfo.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
+    <AssemblyName>Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension</AssemblyName>
+    <RootNamespace>Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension</RootNamespace>
+    <Version>$(ImportMapExtensionVersion)</Version>
+    <IsPackable>false</IsPackable>
+    <!-- Everything this extension needs is in the shared framework, and the hand-written
+         dependency manifest that ships with it names this one assembly and nothing else. A
+         dependency copied next to it would not be loaded, so there is nothing to copy. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PrivateAssets keeps this out of the "frameworkReferences" section of the .nuspec. This
+         package ships a tool that the development server loads, not a library that consumers
+         compile against. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../Shared/**/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ImportMapExtension.Test" />
+  </ItemGroup>
+
+</Project>

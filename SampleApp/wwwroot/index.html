@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <!-- A strict policy: no "unsafe-inline", and no exception of any kind for scripts written into
+         the page. The only one this app needs is the import map that the .NET SDK generates, and
+         "sha256-{importmap}" below is replaced with its digest - by the development server
+         extension while you develop, and by this package's MSBuild targets when you publish. -->
+    <meta http-equiv="Content-Security-Policy" content="
+        base-uri 'self';
+        default-src 'self';
+        img-src 'self' data:;
+        object-src 'none';
+        script-src 'self' 'wasm-unsafe-eval' 'sha256-{importmap}';
+        style-src 'self';
+        connect-src 'self';
+        upgrade-insecure-requests;" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SampleApp</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="css/blazor-ui.css" />
+    <link rel="stylesheet" href="SampleApp.styles.css" />
+    <script type="importmap"></script>
+</head>
+
+<body>
+    <div id="app">
+        <svg class="loading-progress">
+            <circle r="40%" cx="50%" cy="50%" />
+            <circle r="40%" cx="50%" cy="50%" />
+        </svg>
+        <div class="loading-progress-text"></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">🗙</a>
+    </div>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+</body>
+
+</html>

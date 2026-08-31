@@ -1,0 +1,36 @@
+@inject IJSRuntime JSRuntime
+
+<div class="sample-app">
+    <h1>Blazor WebAssembly under a strict Content Security Policy</h1>
+
+    <p>
+        This page was served with a policy that allows no inline script other than the import map
+        the .NET SDK generated. The greeting below comes from a collocated JavaScript module, which
+        you can edit and see updated by reloading the page, with no rebuild.
+    </p>
+
+    <p id="greeting">@this._Greeting</p>
+</div>
+
+@code {
+    private string _Greeting = "(not loaded)";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            await using var module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./App.razor.js");
+            this._Greeting = await module.InvokeAsync<string>("greeting");
+        }
+        catch (JSException e)
+        {
+            // The browser refusing the module is exactly what this package exists to prevent, so
+            // say so on the page rather than letting the error UI hide it.
+            this._Greeting = "(module failed to load: " + e.Message + ")";
+        }
+
+        this.StateHasChanged();
+    }
+}

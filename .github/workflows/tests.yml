@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  perform-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      # The end-to-end tests drive whatever Chromium they find, and skip themselves when there is none.
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v2
+        id: setup-chrome
+
+      - name: Perform tests
+        env:
+          CSP_TEST_BROWSER: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: dotnet test --project ./ImportMapExtension.Test/ImportMapExtension.Test.csproj --output detailed

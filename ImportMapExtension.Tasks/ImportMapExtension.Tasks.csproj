@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="../VersionInfo.props" />
+
+  <PropertyGroup>
+    <!-- Both MSBuild flavors have to be able to load this task: the .NET Framework one that Visual
+         Studio runs, and the .NET one that "dotnet build" runs. A single "netstandard2.0" assembly
+         is not an option, because "Microsoft.Build.Utilities.Core" stopped shipping netstandard2.0
+         assets in 17.11. -->
+    <TargetFrameworks>net472;net8.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
+    <AssemblyName>Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.Tasks</AssemblyName>
+    <RootNamespace>Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension</RootNamespace>
+    <Version>$(ImportMapExtensionVersion)</Version>
+    <IsPackable>false</IsPackable>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- NU1903: the advisory is about the MSBuild assemblies at run time. This project compiles
+         against them and ships none of them; the MSBuild that loads the task is the one the
+         consumer already runs. -->
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.8" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../Shared/**/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+</Project>

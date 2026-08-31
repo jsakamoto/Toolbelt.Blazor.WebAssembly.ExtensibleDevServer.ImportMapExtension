@@ -1,0 +1,20 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- The token to look for in the Content Security Policy of your HTML. -->
+    <ImportMapCspPlaceholder Condition="'$(ImportMapCspPlaceholder)' == ''">{importmap}</ImportMapCspPlaceholder>
+
+    <!-- Set to "false" to stop writing the digest into the policy, and to stop the checks that go
+         with it. The removal of the "integrity" member during development is not affected. -->
+    <ImportMapCspEnabled Condition="'$(ImportMapCspEnabled)' == ''">true</ImportMapCspEnabled>
+
+    <!-- Set to "false" to leave the "integrity" member of the import map alone during development.
+         Editing a collocated JavaScript module then needs a rebuild before the page will load. -->
+    <ImportMapStripIntegrity Condition="'$(ImportMapStripIntegrity)' == ''">true</ImportMapStripIntegrity>
+
+    <!-- Optional. When set, the digests written during publish are also saved to this file, one per
+         line, for deployments that deliver the policy as a response header. -->
+    <ImportMapCspHashOutputFile Condition="'$(ImportMapCspHashOutputFile)' == ''"></ImportMapCspHashOutputFile>
+  </PropertyGroup>
+
+</Project>

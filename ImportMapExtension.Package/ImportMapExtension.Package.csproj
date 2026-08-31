@@ -1,0 +1,128 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="../VersionInfo.props" />
+
+  <PropertyGroup>
+    <!-- This project builds nothing of its own. It exists to gather the development server
+         extension and the MSBuild task into one package. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PackageId>Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension</PackageId>
+    <Version>$(ImportMapExtensionVersion)</Version>
+    <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>$(RepositoryUrl)</PackageProjectUrl>
+    <PackageTags>blazor;blazor-webassembly;blazorwebassembly;blazorwasm;devserver;importmap;csp;content-security-policy</PackageTags>
+    <PackageReleaseNotes>(Please write the package release notes in "../RELEASE-NOTES.txt")</PackageReleaseNotes>
+    <PackageOutputPath>../_dist/</PackageOutputPath>
+    <Description>Lets you edit a collocated JavaScript module of a standalone Blazor WebAssembly app and just reload the page, with no rebuild, and makes the import map that the .NET SDK writes into your page work under a strict Content Security Policy. Requires Toolbelt.Blazor.WebAssembly.ExtensibleDevServer during development.</Description>
+    <PackageIcon>nupkg-icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <!-- NU5128: this package has no "lib" folder on purpose.
+         NU5100: the assemblies live in "tools" and "tasks", which is also on purpose. -->
+    <NoWarn>$(NoWarn);NU5128;NU5100</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../.assets/nupkg-icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../README.md" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../LICENSE" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="PackageContents/**/*" Pack="true" PackagePath="/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- The development server loads the extension from "tools/net10.0", and the ".targets" file
+       loads the task from "tasks/<flavor>". Neither is a library that consumers compile against, so
+       neither goes into "lib". -->
+  <!-- Built with the MSBuild task rather than a ProjectReference. A reference would negotiate a
+       single compatible target framework with the task project and build only "net8.0", leaving the
+       "net472" flavor that Visual Studio needs out of the package. -->
+  <Target Name="BuildPackagedProjects" BeforeTargets="BundleAssemblies">
+    <ItemGroup>
+      <_ImportMapPackagedProject Include="../ImportMapExtension/ImportMapExtension.csproj" />
+      <_ImportMapPackagedProject Include="../ImportMapExtension.Tasks/ImportMapExtension.Tasks.csproj" />
+    </ItemGroup>
+    <!-- Restored in a call of its own. Packing this project restores only this project, and neither
+         of these is a reference of it. -->
+    <MSBuild Projects="@(_ImportMapPackagedProject)"
+             Targets="Restore"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="TargetFramework" />
+    <MSBuild Projects="@(_ImportMapPackagedProject)"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="TargetFramework" />
+  </Target>
+
+  <Target Name="BundleAssemblies" BeforeTargets="GenerateNuspec;_GetPackageFiles">
+    <PropertyGroup>
+      <_ExtensionOutputDir>../ImportMapExtension/bin/$(Configuration)/net10.0/</_ExtensionOutputDir>
+      <_TasksOutputDir>../ImportMapExtension.Tasks/bin/$(Configuration)/</_TasksOutputDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <None Include="$(_ExtensionOutputDir)*.dll" Pack="true" PackagePath="/tools/net10.0" />
+      <None Include="$(_TasksOutputDir)net472/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.Tasks.dll" Pack="true" PackagePath="/tasks/net472" />
+      <None Include="$(_TasksOutputDir)net8.0/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.Tasks.dll" Pack="true" PackagePath="/tasks/net8.0" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The development server is a process of its own, started from the driver in the
+       "Toolbelt.Blazor.WebAssembly.ExtensibleDevServer" package, so the .NET runtime has no way of
+       knowing that this extension exists. This manifest is what "DOTNET_ADDITIONAL_DEPS" points at:
+       it names the assembly and where to find it, relative to the extracted package folder that the
+       driver adds to the probing paths.
+
+       It is written out here rather than committed, because the path it names and the version it
+       carries have to be the ones being packed right now. -->
+  <Target Name="GenerateDepsJson" BeforeTargets="GenerateNuspec;_GetPackageFiles">
+    <PropertyGroup>
+      <_ImportMapDepsJsonPath>$(IntermediateOutputPath)$(PackageId).deps.json</_ImportMapDepsJsonPath>
+      <_ImportMapLibraryKey>$(PackageId.ToLower())/$(Version)</_ImportMapLibraryKey>
+    </PropertyGroup>
+    <ItemGroup>
+      <DepsJsonLine Include="{" />
+      <DepsJsonLine Include="%20 &quot;runtimeTarget&quot;: {" />
+      <DepsJsonLine Include="%20   &quot;name&quot;: &quot;.NETCoreApp,Version=v10.0&quot;," />
+      <DepsJsonLine Include="%20   &quot;signature&quot;: &quot;&quot;" />
+      <DepsJsonLine Include="%20 }," />
+      <DepsJsonLine Include="%20 &quot;compilationOptions&quot;: {}," />
+      <DepsJsonLine Include="%20 &quot;targets&quot;: {" />
+      <DepsJsonLine Include="%20   &quot;.NETCoreApp,Version=v10.0&quot;: {" />
+      <DepsJsonLine Include="%20     &quot;$(_ImportMapLibraryKey)&quot;: {" />
+      <DepsJsonLine Include="%20       &quot;runtime&quot;: {" />
+      <DepsJsonLine Include="%20         &quot;tools/net10.0/$(PackageId).dll&quot;: {}" />
+      <DepsJsonLine Include="%20       }" />
+      <DepsJsonLine Include="%20     }" />
+      <DepsJsonLine Include="%20   }" />
+      <DepsJsonLine Include="%20 }," />
+      <DepsJsonLine Include="%20 &quot;libraries&quot;: {" />
+      <DepsJsonLine Include="%20   &quot;$(_ImportMapLibraryKey)&quot;: {" />
+      <DepsJsonLine Include="%20     &quot;type&quot;: &quot;project&quot;," />
+      <DepsJsonLine Include="%20     &quot;serviceable&quot;: false," />
+      <DepsJsonLine Include="%20     &quot;sha512&quot;: &quot;&quot;" />
+      <DepsJsonLine Include="%20   }" />
+      <DepsJsonLine Include="%20 }" />
+      <DepsJsonLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_ImportMapDepsJsonPath)" Lines="@(DepsJsonLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <None Include="$(_ImportMapDepsJsonPath)" Pack="true" PackagePath="/tools/net10.0" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="PreparePackageReleaseNotesFromFile" BeforeTargets="GenerateNuspec">
+    <ReadLinesFromFile File="../RELEASE-NOTES.txt">
+      <Output TaskParameter="Lines" ItemName="ReleaseNoteLines" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <PackageReleaseNotes>@(ReleaseNoteLines, '%0a')%0av.0.0</PackageReleaseNotes>
+      <PackageReleaseNotes>$(PackageReleaseNotes.Replace('&lt;','&amp;lt;'))</PackageReleaseNotes>
+      <PackageReleaseNotes>$(PackageReleaseNotes.Replace('&gt;','&amp;gt;'))</PackageReleaseNotes>
+      <PackageReleaseNotes>$([System.Text.RegularExpressions.Regex]::Match($(PackageReleaseNotes), "^(v\.[\d\.\w\-]+.+?)v\.[\d\.]+", System.Text.RegularExpressions.RegexOptions.Singleline).Groups[1].Value)</PackageReleaseNotes>
+      <PackageReleaseNotes>$(PackageReleaseNotes)%0aTo see all the change logs, please visit the following URL.%0a- $(RepositoryUrl)/blob/main/RELEASE-NOTES.txt</PackageReleaseNotes>
+    </PropertyGroup>
+  </Target>
+
+</Project>

@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="ImportMapExtension/ImportMapExtension.csproj" />
+  <Project Path="ImportMapExtension.Package/ImportMapExtension.Package.csproj" />
+  <Project Path="ImportMapExtension.Tasks/ImportMapExtension.Tasks.csproj" />
+  <Project Path="ImportMapExtension.Test/ImportMapExtension.Test.csproj" />
+  <Project Path="SampleApp/SampleApp.csproj" />
+</Solution>

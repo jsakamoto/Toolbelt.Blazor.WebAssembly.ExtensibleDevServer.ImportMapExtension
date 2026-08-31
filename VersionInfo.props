@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <ExtensibleDevServerVersion>10.0.11</ExtensibleDevServerVersion>
+    <ImportMapExtensionVersion>10.0.11</ImportMapExtensionVersion>
+    <Copyright>Copyright © 2026 J.Sakamoto, Mozilla Public License 2.0</Copyright>
+    <Authors>J.Sakamoto</Authors>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/jsakamoto/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension</RepositoryUrl>
+  </PropertyGroup>
+</Project>

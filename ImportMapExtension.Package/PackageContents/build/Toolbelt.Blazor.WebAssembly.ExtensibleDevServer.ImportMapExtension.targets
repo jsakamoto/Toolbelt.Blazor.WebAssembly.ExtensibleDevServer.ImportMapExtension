@@ -1,0 +1,157 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- "Core" is the MSBuild that "dotnet build" runs, anything else is the .NET Framework one
+         that Visual Studio runs. -->
+    <_ImportMapTaskFramework Condition="'$(MSBuildRuntimeType)' == 'Core'">net8.0</_ImportMapTaskFramework>
+    <_ImportMapTaskFramework Condition="'$(_ImportMapTaskFramework)' == ''">net472</_ImportMapTaskFramework>
+    <_ImportMapTaskAssembly>$(MSBuildThisFileDirectory)../tasks/$(_ImportMapTaskFramework)/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.Tasks.dll</_ImportMapTaskAssembly>
+    <_ImportMapHelpUrl>https://github.com/jsakamoto/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension</_ImportMapHelpUrl>
+  </PropertyGroup>
+
+  <UsingTask TaskName="Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.RewriteImportMapCspHash" AssemblyFile="$(_ImportMapTaskAssembly)" />
+  <UsingTask TaskName="Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.FindImportMapCspPlaceholder" AssemblyFile="$(_ImportMapTaskAssembly)" />
+
+  <!-- ==========================================================================================
+       Development: hand the development server this package's extension, and tell it what the
+       project wants.
+
+       The development server is started as a process of its own, so it learns none of this from
+       MSBuild directly. "BzExDevSvrAssembly" names the assembly for
+       "ASPNETCORE_HOSTINGSTARTUPASSEMBLIES", "BzExDevSvrDeps" points at the dependency manifest
+       that tells the runtime where that assembly actually lives, and "BzExDevSvrEnvValue" carries
+       the settings across as environment variables.
+       ========================================================================================== -->
+
+  <Target Name="BzExDevSvr_ImportMap_PrepareResponseFile" BeforeTargets="BzExDevSvr_GenerateResponseFile">
+    <ItemGroup>
+      <BzExDevSvrAssembly Include="Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension" />
+      <BzExDevSvrDeps Include="$(MSBuildThisFileDirectory)../tools/net10.0/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.deps.json" />
+      <BzExDevSvrEnvValue Include="IMPORTMAP_CSP_PLACEHOLDER=$(ImportMapCspPlaceholder)" />
+      <BzExDevSvrEnvValue Include="IMPORTMAP_STRIP_INTEGRITY=$(ImportMapStripIntegrity)" />
+    </ItemGroup>
+
+    <PropertyGroup>
+      <_ImportMapDevServerRegistered>true</_ImportMapDevServerRegistered>
+    </PropertyGroup>
+  </Target>
+
+  <!-- ==========================================================================================
+       Publish: write the digest into the policy.
+
+       The .NET SDK does not rewrite "wwwroot/index.html" in place. It writes a rewritten copy into
+       "obj/.../staticwebassets/htmlassetplaceholders/publish/", and only then registers that copy
+       as a static web asset. Everything else the SDK produces for that file - the pre-compressed
+       ".br" and ".gz" copies, the integrity values and ETags in the endpoint manifest, and the
+       service worker asset manifest - is computed from that copy, afterwards.
+
+       So this steps in between those two phases and rewrites the intermediate copy. Rewriting the
+       published output instead would leave all of the above describing content that no longer
+       exists.
+
+       There is deliberately no equivalent for the build pipeline. During development the
+       placeholder stays in the document, and the development server extension fills it in as the
+       page is served, from the content that actually ships after the "integrity" member is removed.
+       ========================================================================================== -->
+
+  <Target Name="ImportMapCsp_RewritePublish"
+          Condition="'$(ImportMapCspEnabled)' == 'true' and '@(_HtmlPublishCandidates)' != ''"
+          AfterTargets="GenerateHtmlAssetPlaceholdersPublishStaticWebAssets"
+          BeforeTargets="ResolveHtmlAssetPlaceholdersPublishStaticWebAssets">
+
+    <RewriteImportMapCspHash HtmlFiles="@(_HtmlPublishCandidates)" Placeholder="$(ImportMapCspPlaceholder)">
+      <Output TaskParameter="Hashes" PropertyName="ImportMapCspHash" />
+      <Output TaskParameter="Hashes" ItemName="ImportMapCspHashes" />
+    </RewriteImportMapCspHash>
+
+    <WriteLinesToFile Condition="'$(ImportMapCspHashOutputFile)' != '' and '@(ImportMapCspHashes)' != ''"
+                      File="$(ImportMapCspHashOutputFile)"
+                      Lines="@(ImportMapCspHashes)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+
+    <PropertyGroup>
+      <_ImportMapCspPublishRewriteRan>true</_ImportMapCspPublishRewriteRan>
+    </PropertyGroup>
+  </Target>
+
+  <!-- ==========================================================================================
+       Checks. A placeholder that is never replaced produces an app that no browser can start, so
+       nothing that would leave one in place is allowed to pass quietly.
+       ========================================================================================== -->
+
+  <Target Name="ImportMapCsp_CollectSourceHtml" Condition="'$(ImportMapCspEnabled)' == 'true'">
+    <ItemGroup>
+      <!-- Both sources are needed. The glob alone would miss a project that keeps its HTML
+           somewhere other than "wwwroot". "@(Content)" alone would miss the one case this most
+           needs to catch: when "OverrideHtmlAssetPlaceholders" is not true, the SDK takes the
+           document out of "Content" altogether, so the check for that would go blind exactly when
+           it matters. -->
+      <_ImportMapSourceHtmlCandidate Include="@(Content)" Condition="'%(Extension)' == '.html'" />
+      <_ImportMapSourceHtmlCandidate Include="$(MSBuildProjectDirectory)/wwwroot/**/*.html" />
+    </ItemGroup>
+
+    <RemoveDuplicates Inputs="@(_ImportMapSourceHtmlCandidate->'%(FullPath)')">
+      <Output TaskParameter="Filtered" ItemName="_ImportMapSourceHtml" />
+    </RemoveDuplicates>
+
+    <FindImportMapCspPlaceholder Condition="'@(_ImportMapSourceHtml)' != ''"
+                                 Files="@(_ImportMapSourceHtml)"
+                                 Placeholder="$(ImportMapCspPlaceholder)">
+      <Output TaskParameter="MatchedFiles" ItemName="_ImportMapSourceHtmlWithPlaceholder" />
+    </FindImportMapCspPlaceholder>
+  </Target>
+
+  <!-- After "Build", not after the static web asset targets: the development server registers its
+       extensions in a target that runs "BeforeTargets=Build", which is after everything Build
+       depends on. Checking any earlier would report a development server that is installed as
+       missing. -->
+  <Target Name="ImportMapCsp_VerifyBuild"
+          Condition="'$(ImportMapCspEnabled)' == 'true' and '$(WasmBuildingForNestedPublish)' != 'true'"
+          DependsOnTargets="ImportMapCsp_CollectSourceHtml"
+          AfterTargets="Build">
+
+    <Error Condition="'@(_ImportMapSourceHtmlWithPlaceholder)' != '' and '$(OverrideHtmlAssetPlaceholders)' != 'true'"
+           Code="IMCSP001"
+           Text="@(_ImportMapSourceHtmlWithPlaceholder->'%(Identity)', ', ') uses the &quot;$(ImportMapCspPlaceholder)&quot; placeholder, but this project does not ask the SDK to generate an import map, so there is nothing to compute a digest from. Add &lt;OverrideHtmlAssetPlaceholders&gt;true&lt;/OverrideHtmlAssetPlaceholders&gt; to a &lt;PropertyGroup&gt; in your project file. See $(_ImportMapHelpUrl)" />
+
+    <!-- A warning rather than an error: "dotnet publish" builds first, and the publish half of this
+         package works perfectly well without the development server. Only the development
+         experience needs it, and that failure is loud and immediate in the browser console. -->
+    <Warning Condition="'@(_ImportMapSourceHtmlWithPlaceholder)' != '' and '$(_ImportMapDevServerRegistered)' != 'true'"
+             Code="IMCSP004"
+             Text="@(_ImportMapSourceHtmlWithPlaceholder->'%(Identity)', ', ') uses the &quot;$(ImportMapCspPlaceholder)&quot; placeholder, but Toolbelt.Blazor.WebAssembly.ExtensibleDevServer is not installed, so nothing will fill it in while you develop and the app will not start. Add a PackageReference to Toolbelt.Blazor.WebAssembly.ExtensibleDevServer. See $(_ImportMapHelpUrl)" />
+  </Target>
+
+  <Target Name="ImportMapCsp_VerifyPublish"
+          Condition="'$(ImportMapCspEnabled)' == 'true' and '$(WasmBuildingForNestedPublish)' != 'true'"
+          DependsOnTargets="ImportMapCsp_CollectSourceHtml"
+          AfterTargets="ResolvePublishRelatedStaticWebAssets">
+
+    <Error Condition="'@(_ImportMapSourceHtmlWithPlaceholder)' != '' and '$(_ImportMapCspPublishRewriteRan)' != 'true'"
+           Code="IMCSP002"
+           Text="The &quot;$(ImportMapCspPlaceholder)&quot; placeholder was not replaced, because this package could not find the step of the .NET SDK that generates the import map. This build is using SDK $(NETCoreSdkVersion); the package needs 10.0.400 or later. If you are already on a later SDK, the SDK has most likely changed how it generates import maps, so please report it at $(_ImportMapHelpUrl)/issues" />
+  </Target>
+
+  <!-- The check above proves that the rewriting step ran. This one proves that it worked, by
+       reading back what is actually about to be deployed. -->
+  <Target Name="ImportMapCsp_VerifyPublishedOutput"
+          Condition="'$(ImportMapCspEnabled)' == 'true' and '$(WasmBuildingForNestedPublish)' != 'true'"
+          AfterTargets="Publish">
+
+    <ItemGroup>
+      <_ImportMapPublishedHtml Include="$(PublishDir)**/*.html" />
+    </ItemGroup>
+
+    <FindImportMapCspPlaceholder Condition="'@(_ImportMapPublishedHtml)' != ''"
+                                 Files="@(_ImportMapPublishedHtml)"
+                                 Placeholder="$(ImportMapCspPlaceholder)">
+      <Output TaskParameter="MatchedFiles" ItemName="_ImportMapPublishedHtmlWithPlaceholder" />
+    </FindImportMapCspPlaceholder>
+
+    <Error Condition="'@(_ImportMapPublishedHtmlWithPlaceholder)' != ''"
+           Code="IMCSP003"
+           Text="The published @(_ImportMapPublishedHtmlWithPlaceholder->'%(Identity)', ', ') still contains the &quot;$(ImportMapCspPlaceholder)&quot; placeholder. Deploying it would give you a Content Security Policy that blocks the import map and an app that does not start. Please report this at $(_ImportMapHelpUrl)/issues" />
+  </Target>
+
+</Project>

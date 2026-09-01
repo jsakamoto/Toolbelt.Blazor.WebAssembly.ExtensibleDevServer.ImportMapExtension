@@ -5,11 +5,11 @@
 Edit a collocated JavaScript module of a standalone Blazor WebAssembly app and just reload the page.
 No rebuild. And run the whole thing under a strict Content Security Policy, with no `'unsafe-inline'`.
 
-## The problems
+## ⚠️ The problems
 
 Both problems below live in `wwwroot/index.html` of a standalone Blazor WebAssembly project, once you
 turn on the .NET 10 SDK's HTML asset placeholder rewriting (`OverrideHtmlAssetPlaceholders`, more on
-this in [How to use](#how-to-use)). This package fixes both of them.
+this in [How to use](#-how-to-use)). This package fixes both of them.
 
 ### Editing a `.js` file breaks the page until you rebuild
 
@@ -50,7 +50,7 @@ component and no such guidance.
 
 [web-app-guidance]: https://learn.microsoft.com/aspnet/core/blazor/security/content-security-policy#resolving-csp-violations-with-subresource-integrity-sri-or-a-cryptographic-nonce
 
-## What this package does
+## 🛠️ What this package does
 
 This package bundles a development server extension and an MSBuild target. The extension rewrites
 the Blazor development server's response on the fly. The target runs at build and publish time.
@@ -72,7 +72,7 @@ what lets you drop `'unsafe-inline'` from your script policy.
 These two things must live in one package. Removing `integrity` changes the import map, so it also
 changes its hash. Whoever removes `integrity` has to be the one who writes the digest.
 
-## How to use
+## 🚀 How to use
 
 ### 1. Install
 
@@ -125,7 +125,7 @@ That is all. Run the app, edit an imported `.js` file, reload, and it works. Pub
 `'wasm-unsafe-eval'` is needed by the .NET WebAssembly runtime itself, and is not something this
 package can remove.
 
-## Delivering the policy as a response header
+## 📨 Delivering the policy as a response header
 
 A `<meta>` policy cannot express `frame-ancestors`, `report-to`, `report-uri` or `sandbox`, so many
 deployments send a `Content-Security-Policy` header instead. Ask for the digest in a file. Feed that
@@ -141,24 +141,24 @@ sha256-G0ljhAw8W4oTdNcwOzeTZpKKR+KCC1VGyODygTruFm4=
 
 The digest is also available to later MSBuild targets as `$(ImportMapCspHash)`.
 
-## Settings
+## ⚙️ Settings
 
 | Property | Default | What it does |
 |---|---|---|
 | `ImportMapCspPlaceholder` | `{importmap}` | The token to look for. |
-| `ImportMapCspEnabled` | `true` | Set to `false` to stop writing the digest, and to stop every check in [When something goes wrong](#when-something-goes-wrong). |
+| `ImportMapCspEnabled` | `true` | Set to `false` to stop writing the digest, and to stop every check in [When something goes wrong](#-when-something-goes-wrong). |
 | `ImportMapStripIntegrity` | `true` | Set to `false` to leave the `integrity` member alone while you develop. |
 | `ImportMapCspHashOutputFile` | *(none)* | Where to save the digests computed during publish. |
 
 `sha384` and `sha512` work too. Write `'sha384-{importmap}'` and that is what you get.
 
-## Requirements
+## 📋 Requirements
 
 - .NET 10 (SDK 10.0.400 or later)
 - A standalone Blazor WebAssembly app with `OverrideHtmlAssetPlaceholders` set to `true`
 - `Toolbelt.Blazor.WebAssembly.ExtensibleDevServer`, for the development half
 
-## What it does not cover
+## 🚫 What it does not cover
 
 This package fixes the problem of editing a `.js` file. It does not fix every integrity problem.
 Two other things also carry a digest of their own. This package does not touch either one.
@@ -181,7 +181,7 @@ These things are also out of scope.
 Turning off `integrity` during development can hide a real integrity problem until you publish. In
 practice you lose nothing. The error you see today is only a false alarm about your own edit.
 
-## When something goes wrong
+## 🆘 When something goes wrong
 
 A placeholder that is never replaced leaves you with an app that no browser can start. This package
 reports that instead of shipping it.
@@ -196,7 +196,7 @@ reports that instead of shipping it.
 | `IMCSP011` | The document has more than one import map, so there is no single digest to write. |
 | `IMCSP012` | The placeholder has no `sha256-`, `sha384-` or `sha512-` in front of it. |
 
-## Working on this package
+## 🧪 Working on this package
 
 `dotnet test` packs the package once, publishes the sample app with it, and checks what a static host
 would serve. It also runs the sample app the way you would, edits a module, reloads, and checks that
@@ -216,6 +216,6 @@ for this, and whichever browsers you happen to have are left alone.
 MSBuild keeps task assemblies loaded in its worker processes. If a rebuild fails with "access to the
 path is denied", run `dotnet build-server shutdown`.
 
-## License and 3rd Party Notices
+## 📄 License and 3rd Party Notices
 
 Mozilla Public License 2.0. See [LICENSE](LICENSE).

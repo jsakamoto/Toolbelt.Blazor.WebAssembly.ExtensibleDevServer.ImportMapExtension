@@ -17,7 +17,7 @@
     <PackageTags>blazor;blazor-webassembly;blazorwebassembly;blazorwasm;devserver;importmap;csp;content-security-policy</PackageTags>
     <PackageReleaseNotes>(Please write the package release notes in "../RELEASE-NOTES.txt")</PackageReleaseNotes>
     <PackageOutputPath>../_dist/</PackageOutputPath>
-    <Description>Lets you edit a collocated JavaScript module of a standalone Blazor WebAssembly app and just reload the page, with no rebuild, and makes the import map that the .NET SDK writes into your page work under a strict Content Security Policy. Requires Toolbelt.Blazor.WebAssembly.ExtensibleDevServer during development.</Description>
+    <Description>In a standalone Blazor WebAssembly app, edit a collocated JavaScript module and just reload, with no rebuild, under a strict Content Security Policy.</Description>
     <PackageIcon>nupkg-icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <DevelopmentDependency>true</DevelopmentDependency>

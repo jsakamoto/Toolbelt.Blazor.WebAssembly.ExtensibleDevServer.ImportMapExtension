@@ -1,6 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <Import Project="../VersionInfo.props" />
+  <Import Project="../ImportMapExtension.Shared/ImportMapExtension.Shared.projitems" Label="Shared" />
 
   <PropertyGroup>
     <!-- Both MSBuild flavors have to be able to load this task: the .NET Framework one that Visual
@@ -26,10 +27,6 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.8" ExcludeAssets="runtime" PrivateAssets="all" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="../Shared/**/*.cs" LinkBase="Shared" />
   </ItemGroup>
 
 </Project>

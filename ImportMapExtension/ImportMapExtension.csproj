@@ -1,6 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <Import Project="../VersionInfo.props" />
+  <Import Project="../ImportMapExtension.Shared/ImportMapExtension.Shared.projitems" Label="Shared" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -23,10 +24,6 @@
          package ships a tool that the development server loads, not a library that consumers
          compile against. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" PrivateAssets="all" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="../Shared/**/*.cs" LinkBase="Shared" />
   </ItemGroup>
 
   <ItemGroup>

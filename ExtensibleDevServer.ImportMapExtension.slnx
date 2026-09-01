@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="ImportMapExtension/ImportMapExtension.csproj" />
   <Project Path="ImportMapExtension.Package/ImportMapExtension.Package.csproj" />
+  <Project Path="ImportMapExtension.Shared/ImportMapExtension.Shared.shproj" Id="34fe5bd3-703a-458a-afd8-906800a49782" />
   <Project Path="ImportMapExtension.Tasks/ImportMapExtension.Tasks.csproj" />
   <Project Path="ImportMapExtension.Test/ImportMapExtension.Test.csproj" />
   <Project Path="SampleApp/SampleApp.csproj" />

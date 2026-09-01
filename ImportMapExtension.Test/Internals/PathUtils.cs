@@ -1,12 +1,9 @@
-using System.Runtime.CompilerServices;
+using Toolbelt;
 
 namespace ImportMapExtension.Test.Internals;
 
 internal static class PathUtils
 {
-    /// <summary>The folder of the solution, found from the path of this source file.</summary>
-    public static string SolutionDir { get; } = GetSolutionDir();
-
-    private static string GetSolutionDir([CallerFilePath] string thisFilePath = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(thisFilePath)!, "..", ".."));
+    /// <summary>The folder of the solution.</summary>
+    public static readonly string SolutionDir = FileIO.FindContainerDirToAncestor("*.slnx");
 }

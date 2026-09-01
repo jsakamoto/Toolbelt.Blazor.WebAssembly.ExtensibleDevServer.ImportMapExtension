@@ -1,6 +1,6 @@
 # Blazor WebAssembly Extensible Dev Server - ImportMap Extension
 
-[![NuGet Package](https://img.shields.io/nuget/v/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.svg)](https://www.nuget.org/packages/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension/)
+[![tests](https://github.com/jsakamoto/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension/actions/workflows/tests.yml/badge.svg)](https://github.com/jsakamoto/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension/actions/workflows/tests.yml) [![NuGet Package](https://img.shields.io/nuget/v/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension.svg)](https://www.nuget.org/packages/Toolbelt.Blazor.WebAssembly.ExtensibleDevServer.ImportMapExtension/)
 
 Edit a collocated JavaScript module of a standalone Blazor WebAssembly app and just reload the page.
 No rebuild. And run the whole thing under a strict Content Security Policy, with no `'unsafe-inline'`.

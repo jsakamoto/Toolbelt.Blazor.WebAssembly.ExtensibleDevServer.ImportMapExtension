@@ -1,10 +1,4 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
-using System.Net.WebSockets;
-using System.Text;
-using System.Text.Json;
+using Microsoft.Playwright;
 
 namespace ImportMapExtension.Test.Internals;
 
@@ -22,270 +16,102 @@ internal sealed record PageReport(string Greeting, string ImportResult, IReadOnl
 }
 
 /// <summary>
-/// Drives a headless Chromium over the DevTools protocol.
+/// Drives a headless Chromium with Playwright.
 /// <para>
 /// A digest that a test computes the same way the code under test computes it proves nothing about
-/// whether a browser accepts it. Only a browser can answer that, so this asks one.
+/// whether a browser accepts it. Only a browser can answer that, so this asks one. Playwright brings
+/// a Chromium of its own, so this needs no browser to be installed on the machine running the tests
+/// and none inside the container that the app under test is running in.
 /// </para>
 /// </summary>
 internal static class HeadlessBrowser
 {
     /// <summary>How long the WebAssembly runtime is given to download, start and render.</summary>
-    private static readonly TimeSpan SettleTime = TimeSpan.FromSeconds(25);
+    private static readonly TimeSpan SettleTime = TimeSpan.FromSeconds(30);
+
+    /// <summary>What the sample app renders until its module has been imported.</summary>
+    private const string NotLoadedYet = "(not loaded)";
 
     /// <summary>
-    /// Returns the path of a Chromium to drive, or <c>null</c> when this machine has none. Set
-    /// "CSP_TEST_BROWSER" to point at a specific one.
+    /// Downloads the Chromium that goes with the version of Playwright referenced here. It lands in
+    /// a cache of Playwright's own, so this downloads nothing on a machine that already has it, and
+    /// a browser the machine happens to have installed is neither used nor needed.
     /// </summary>
-    public static string? Find()
+    public static void InstallChromium()
     {
-        var configured = Environment.GetEnvironmentVariable("CSP_TEST_BROWSER");
-        if (!string.IsNullOrEmpty(configured) && File.Exists(configured)) return configured;
-
-        string[] candidates = OperatingSystem.IsWindows()
-            ?
-            [
-                @"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            ]
-            :
-            [
-                "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
-                "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/microsoft-edge",
-            ];
-
-        return candidates.FirstOrDefault(File.Exists);
+        var exitCode = Microsoft.Playwright.Program.Main(["install", "chromium"]);
+        exitCode.Is(0, message: "\"playwright install chromium\" failed.");
     }
 
-    /// <summary>Skips the calling test when this machine has no Chromium to drive.</summary>
-    public static string Require()
+    public static async Task<PageReport> LoadAsync(string url)
     {
-        var path = Find();
-        if (path is null) Assert.Ignore("No Chromium was found on this machine. Set \"CSP_TEST_BROWSER\" to the path of one to run this test.");
-        return path!;
-    }
+        using var playwright = await Playwright.CreateAsync();
 
-    public static async Task<PageReport> LoadAsync(string browserPath, string url)
-    {
-        var port = GetFreePort();
-        var profileDir = Path.Combine(Path.GetTempPath(), "ImportMapExtension.Test", "browser-" + Guid.NewGuid().ToString("N"));
-
-        using var browser = new Process
+        await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
         {
-            StartInfo = new ProcessStartInfo(browserPath,
-            [
-                "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-                "--disable-extensions", "--disable-background-networking",
-                // Without these two the browser never starts on a continuous integration machine.
-                // Its sandbox needs unprivileged user namespaces, which the AppArmor policy of a
-                // current Ubuntu denies to a browser outside its packaged location, and the "/dev/shm"
-                // of a container is too small for the shared memory it wants. Neither matters for a
-                // browser that is started to look at one local page and is killed afterwards.
-                "--no-sandbox", "--disable-dev-shm-usage",
-                $"--user-data-dir={profileDir}", $"--remote-debugging-port={port}", "about:blank",
-            ])
-            { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true }
+            // Without these two the browser never starts on a continuous integration machine. Its
+            // sandbox needs unprivileged user namespaces, which the AppArmor policy of a current
+            // Ubuntu denies to a browser outside its packaged location, and the "/dev/shm" of a
+            // container is too small for the shared memory it wants. Neither matters for a browser
+            // that is started to look at one local page and is thrown away afterwards.
+            Args = ["--no-sandbox", "--disable-dev-shm-usage"],
+        });
+
+        await using var context = await browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        var consoleErrors = new List<string>();
+        var cspViolations = new List<string>();
+
+        // A refused import map and a blocked module are reported by the browser itself rather than
+        // by anything running on the page, so neither of them reaches the "console" event. The
+        // DevTools log is where they land, and Playwright hands out a session on it for a Chromium.
+        var devTools = await context.NewCDPSessionAsync(page);
+        devTools.Event("Log.entryAdded").OnEvent += (_, entry) =>
+        {
+            if (entry is null) return;
+
+            var log = entry.Value.GetProperty("entry");
+            var text = log.GetProperty("text").GetString() ?? "";
+            var source = log.GetProperty("source").GetString() ?? "";
+
+            if (log.GetProperty("level").GetString() == "error") { lock (consoleErrors) consoleErrors.Add($"{source}: {text}"); }
+            if (text.Contains("Content Security Policy", StringComparison.OrdinalIgnoreCase)) { lock (cspViolations) cspViolations.Add(text); }
         };
+        await devTools.SendAsync("Log.enable");
 
-        // Both streams are drained as they arrive. A redirected stream that nobody reads fills its
-        // pipe and blocks the browser, and what it wrote is the only explanation of a browser that
-        // never came up.
-        var diagnostics = new StringBuilder();
-        void Collect(object _, DataReceivedEventArgs e) { if (e.Data is not null) { lock (diagnostics) diagnostics.AppendLine(e.Data); } }
-        browser.OutputDataReceived += Collect;
-        browser.ErrorDataReceived += Collect;
+        page.PageError += (_, error) => { lock (consoleErrors) consoleErrors.Add(error); };
 
-        if (!browser.Start()) throw new InvalidOperationException($"Could not start \"{browserPath}\".");
-        browser.BeginOutputReadLine();
-        browser.BeginErrorReadLine();
+        await page.GotoAsync(url);
 
+        // Wait for the app to render what its module returns. A page that never gets that far is
+        // exactly what some of these tests are looking for, so running out of time here is not a
+        // failure: whatever the page ends up saying is what gets reported.
         try
         {
-            await using var session = await DevToolsSession.ConnectAsync(port, browser, diagnostics);
-
-            await session.SendAsync("Log.enable");
-            await session.SendAsync("Runtime.enable");
-            await session.SendAsync("Page.enable");
-            await session.SendAsync("Page.navigate", new { url });
-
-            await Task.Delay(SettleTime);
-
-            var greeting = await session.EvaluateStringAsync("document.querySelector(\"#greeting\")?.textContent ?? \"(no element)\"");
-
-            // The import is evaluated directly rather than triggered through the page, because
-            // Blazor renders its own exceptions into the error UI and the failure would not reach
-            // the console where this test looks for it.
-            var importResult = await session.EvaluateStringAsync(
-                "import('./App.razor.js').then(m => 'IMPORT OK: ' + m.greeting()).catch(e => 'IMPORT FAILED: ' + e.message)",
-                awaitPromise: true);
-
-            return new PageReport(greeting, importResult, session.ConsoleErrors, session.CspViolations);
+            await page.WaitForFunctionAsync(
+                $$"""() => { const el = document.querySelector("#greeting"); return el !== null && el.textContent !== "{{NotLoadedYet}}"; }""",
+                arg: null,
+                new PageWaitForFunctionOptions { Timeout = (float)SettleTime.TotalMilliseconds });
         }
-        finally
+        catch (Exception e) when (e is TimeoutException or PlaywrightException) { /* the report below says what actually happened */ }
+
+        var greeting = await page.EvaluateAsync<string>(
+            """() => document.querySelector("#greeting")?.textContent ?? "(no element)" """);
+
+        // The import is evaluated directly rather than triggered through the page, because Blazor
+        // renders its own exceptions into the error UI and the failure would not reach the log
+        // where this test looks for it.
+        var importResult = await page.EvaluateAsync<string>(
+            """() => import("./App.razor.js").then(m => "IMPORT OK: " + m.greeting()).catch(e => "IMPORT FAILED: " + e.message)""");
+
+        // The browser reports what it refused as it happens, and the import above is what provokes
+        // some of those reports, so give the last of them a moment to arrive.
+        await Task.Delay(TimeSpan.FromSeconds(1));
+
+        lock (consoleErrors)
         {
-            try { browser.Kill(entireProcessTree: true); } catch { /* it may already be gone */ }
-            try { Directory.Delete(profileDir, recursive: true); } catch { /* it is only a temp folder */ }
-        }
-    }
-
-    public static int GetFreePort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    /// <summary>
-    /// One DevTools connection. A single loop owns the receive side: it completes the answers to
-    /// commands and collects the events, so callers never race each other for the socket.
-    /// </summary>
-    private sealed class DevToolsSession : IAsyncDisposable
-    {
-        private readonly ClientWebSocket _Socket;
-        private readonly Task _Reading;
-        private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _Pending = [];
-        private readonly List<string> _ConsoleErrors = [];
-        private readonly List<string> _CspViolations = [];
-        private int _NextId;
-
-        public IReadOnlyList<string> ConsoleErrors { get { lock (this._ConsoleErrors) return [.. this._ConsoleErrors]; } }
-
-        public IReadOnlyList<string> CspViolations { get { lock (this._CspViolations) return [.. this._CspViolations]; } }
-
-        private DevToolsSession(ClientWebSocket socket)
-        {
-            this._Socket = socket;
-            this._Reading = this.ReadAsync();
-        }
-
-        public static async Task<DevToolsSession> ConnectAsync(int port, Process browser, StringBuilder diagnostics)
-        {
-            var socket = new ClientWebSocket();
-            await socket.ConnectAsync(new Uri(await FindPageTargetAsync(port, browser, diagnostics)), CancellationToken.None);
-            return new DevToolsSession(socket);
-        }
-
-        public async Task<JsonElement> SendAsync(string method, object? parameters = null)
-        {
-            var id = Interlocked.Increment(ref this._NextId);
-            var answer = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-            this._Pending[id] = answer;
-
-            var payload = JsonSerializer.Serialize(new { id, method, @params = parameters ?? new { } });
-            await this._Socket.SendAsync(Encoding.UTF8.GetBytes(payload), WebSocketMessageType.Text, true, CancellationToken.None);
-
-            var completed = await Task.WhenAny(answer.Task, Task.Delay(TimeSpan.FromSeconds(30)));
-            if (completed != answer.Task) throw new TimeoutException($"The browser did not answer \"{method}\".");
-            return await answer.Task;
-        }
-
-        public async Task<string> EvaluateStringAsync(string expression, bool awaitPromise = false)
-        {
-            var answer = await this.SendAsync("Runtime.evaluate", new { expression, awaitPromise, returnByValue = true });
-            return answer.TryGetProperty("result", out var result) && result.TryGetProperty("value", out var value)
-                ? value.GetString() ?? ""
-                : "";
-        }
-
-        private async Task ReadAsync()
-        {
-            var buffer = new byte[64 * 1024];
-            var message = new StringBuilder();
-
-            while (this._Socket.State == WebSocketState.Open)
-            {
-                WebSocketReceiveResult received;
-                try { received = await this._Socket.ReceiveAsync(buffer, CancellationToken.None); }
-                catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException) { return; }
-
-                if (received.MessageType == WebSocketMessageType.Close) return;
-
-                message.Append(Encoding.UTF8.GetString(buffer, 0, received.Count));
-                if (!received.EndOfMessage) continue;
-
-                try { this.Dispatch(message.ToString()); } catch (JsonException) { /* not something this test needs */ }
-                message.Clear();
-            }
-        }
-
-        private void Dispatch(string json)
-        {
-            using var document = JsonDocument.Parse(json);
-            var root = document.RootElement;
-
-            if (root.TryGetProperty("id", out var id) && this._Pending.TryRemove(id.GetInt32(), out var answer))
-            {
-                answer.TrySetResult(root.TryGetProperty("result", out var result) ? result.Clone() : default);
-                return;
-            }
-
-            if (!root.TryGetProperty("method", out var method)) return;
-
-            switch (method.GetString())
-            {
-                case "Log.entryAdded":
-                    var entry = root.GetProperty("params").GetProperty("entry");
-                    var text = entry.GetProperty("text").GetString() ?? "";
-                    var source = entry.GetProperty("source").GetString() ?? "";
-                    if (entry.GetProperty("level").GetString() == "error") { lock (this._ConsoleErrors) this._ConsoleErrors.Add($"{source}: {text}"); }
-                    if (text.Contains("Content Security Policy", StringComparison.OrdinalIgnoreCase)) { lock (this._CspViolations) this._CspViolations.Add(text); }
-                    break;
-
-                case "Runtime.exceptionThrown":
-                    var details = root.GetProperty("params").GetProperty("exceptionDetails");
-                    lock (this._ConsoleErrors) this._ConsoleErrors.Add(details.GetProperty("text").GetString() ?? "an exception was thrown");
-                    break;
-            }
-        }
-
-        private static async Task<string> FindPageTargetAsync(int port, Process browser, StringBuilder diagnostics)
-        {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-
-            for (var attempt = 0; attempt < 150; attempt++)
-            {
-                // A browser that refused to start is the common case, and waiting the full thirty
-                // seconds for it hides the reason it gives on the way out.
-                if (browser.HasExited)
-                {
-                    throw new InvalidOperationException(
-                        $"The browser exited with code {browser.ExitCode} before it exposed a debugging target.{Explain(diagnostics)}");
-                }
-
-                try
-                {
-                    using var targets = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/list"));
-                    foreach (var target in targets.RootElement.EnumerateArray())
-                    {
-                        if (target.GetProperty("type").GetString() == "page") return target.GetProperty("webSocketDebuggerUrl").GetString()!;
-                    }
-                }
-                catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException) { /* it is not listening yet */ }
-
-                await Task.Delay(200);
-            }
-            throw new InvalidOperationException($"The browser never exposed a debugging target.{Explain(diagnostics)}");
-        }
-
-        private static string Explain(StringBuilder diagnostics)
-        {
-            lock (diagnostics)
-            {
-                return diagnostics.Length == 0 ? " It said nothing about why." : "\nThe browser said:\n" + diagnostics;
-            }
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            try { await this._Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None); }
-            catch (Exception e) when (e is WebSocketException or ObjectDisposedException) { /* the browser is going away anyway */ }
-
-            await this._Reading;
-            this._Socket.Dispose();
+            lock (cspViolations) return new PageReport(greeting, importResult, [.. consoleErrors], [.. cspViolations]);
         }
     }
 }

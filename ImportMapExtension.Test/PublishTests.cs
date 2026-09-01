@@ -6,14 +6,35 @@ using ImportMapExtension.Test.Internals;
 namespace ImportMapExtension.Test;
 
 /// <summary>
-/// Publishes the sample app with the packed package and inspects what a static host would serve.
+/// Publishes the sample app with the packed package inside a disposable container, and inspects what
+/// a static host would serve.
 /// </summary>
+[Parallelizable(ParallelScope.All)]
 public class PublishTests
 {
+    private const string PublishDir = $"{SolutionContainer.SolutionDir}/_publish";
+
+    private const string PublishedIndexHtml = $"{PublishDir}/wwwroot/index.html";
+
+    private SolutionContainer _Container = null!;
+
+    /// <summary>
+    /// One publish is all the tests below need, and none of them writes anything, so they share it.
+    /// </summary>
+    [OneTimeSetUp]
+    public async Task PublishTheSampleApp()
+    {
+        this._Container = await SolutionContainer.StartAsync();
+        await this._Container.DotNetAsync($"publish {SolutionContainer.SampleAppProject} -c Release -o {PublishDir}");
+    }
+
+    [OneTimeTearDown]
+    public async Task DisposeTheContainer() => await this._Container.DisposeAsync();
+
     [Test]
     public async Task ThePolicyCarriesTheDigestOfTheImportMapThatWasPublishedWithIt()
     {
-        var html = await File.ReadAllTextAsync(await PackagedSolution.PublishedIndexHtmlAsync());
+        var html = await this._Container.ReadTextAsync(PublishedIndexHtml);
 
         Digest.InPolicyOf(html).Is(Digest.OfImportMapIn(html));
     }
@@ -25,7 +46,7 @@ public class PublishTests
     [Test]
     public async Task ThePublishedImportMapKeepsItsIntegrity()
     {
-        var html = await File.ReadAllTextAsync(await PackagedSolution.PublishedIndexHtmlAsync());
+        var html = await this._Container.ReadTextAsync(PublishedIndexHtml);
 
         Digest.ImportMapOf(html).Contains("\"integrity\"").IsTrue();
     }
@@ -33,9 +54,9 @@ public class PublishTests
     [Test]
     public async Task NoPlaceholderSurvivesIntoThePublishedOutput()
     {
-        foreach (var file in Directory.GetFiles(await PackagedSolution.PublishedWwwRootAsync(), "*.html", SearchOption.AllDirectories))
+        foreach (var file in await this._Container.FindFilesAsync($"{PublishDir}/wwwroot", "*.html"))
         {
-            (await File.ReadAllTextAsync(file)).Contains("{importmap}")
+            (await this._Container.ReadTextAsync(file)).Contains("{importmap}")
                 .IsFalse(message: $"\"{file}\" still has the placeholder in it.");
         }
     }
@@ -49,18 +70,17 @@ public class PublishTests
     [TestCase(".br")]
     public async Task ThePreCompressedCopiesHoldTheSameContentAsTheFileTheyCompress(string extension)
     {
-        var indexHtml = await PackagedSolution.PublishedIndexHtmlAsync();
-        var compressed = indexHtml + extension;
+        var compressed = PublishedIndexHtml + extension;
 
-        File.Exists(compressed).IsTrue(message: $"The SDK did not produce \"{compressed}\".");
+        (await this._Container.FileExistsAsync(compressed)).IsTrue(message: $"The SDK did not produce \"{compressed}\".");
 
-        using var source = File.OpenRead(compressed);
+        using var source = new MemoryStream(await this._Container.ReadBytesAsync(compressed));
         using Stream decompressor = extension == ".gz"
             ? new GZipStream(source, CompressionMode.Decompress)
             : new BrotliStream(source, CompressionMode.Decompress);
         using var reader = new StreamReader(decompressor, Encoding.UTF8);
 
-        (await reader.ReadToEndAsync()).Is(await File.ReadAllTextAsync(indexHtml));
+        (await reader.ReadToEndAsync()).Is(await this._Container.ReadTextAsync(PublishedIndexHtml));
     }
 
     /// <summary>
@@ -70,10 +90,9 @@ public class PublishTests
     [Test]
     public async Task TheEndpointManifestDescribesTheRewrittenFile()
     {
-        var publishDir = await PackagedSolution.PublishedDirAsync;
-        var manifestPath = Directory.GetFiles(publishDir, "*.staticwebassets.endpoints.json").Single();
+        var manifestPath = (await this._Container.GlobAsync($"{PublishDir}/*.staticwebassets.endpoints.json")).Single();
 
-        using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath));
+        using var manifest = JsonDocument.Parse(await this._Container.ReadTextAsync(manifestPath));
         var lengths = manifest.RootElement.GetProperty("Endpoints").EnumerateArray()
             .Where(endpoint => endpoint.GetProperty("Route").GetString() == "index.html")
             .Where(endpoint => !endpoint.GetProperty("ResponseHeaders").EnumerateArray()
@@ -83,23 +102,32 @@ public class PublishTests
                 .GetProperty("Value").GetString())
             .ToArray();
 
+        var publishedLength = (await this._Container.ReadBytesAsync(PublishedIndexHtml)).Length;
+
         lengths.IsNot([], message: "The manifest has no uncompressed endpoint for \"index.html\".");
         foreach (var length in lengths)
         {
-            length.Is(new FileInfo(await PackagedSolution.PublishedIndexHtmlAsync()).Length.ToString());
+            length.Is(publishedLength.ToString());
         }
     }
 
+    /// <summary>
+    /// This one publishes again with a property of its own, and the step that writes the digest only
+    /// runs when the SDK regenerates the document it writes into, so it needs a tree the other
+    /// publish above has not already been through.
+    /// </summary>
     [Test]
     public async Task TheDigestIsWrittenToAFileWhenOneIsAskedFor()
     {
-        var outputDir = Path.Combine(PackagedSolution.WorkRoot, "hashfile");
-        var hashFile = Path.Combine(outputDir, "csp-hash.txt");
+        const string outputDir = $"{SolutionContainer.SolutionDir}/_publish-hashfile";
+        const string hashFile = $"{outputDir}/csp-hash.txt";
 
-        await PackagedSolution.PublishSampleAppAsync(outputDir, $"-p:ImportMapCspHashOutputFile=\"{hashFile}\"");
+        await using var container = await SolutionContainer.StartAsync();
+        await container.DotNetAsync(
+            $"publish {SolutionContainer.SampleAppProject} -c Release -o {outputDir} -p:ImportMapCspHashOutputFile={hashFile}");
 
-        File.Exists(hashFile).IsTrue();
-        var written = (await File.ReadAllLinesAsync(hashFile)).Single();
-        written.Is(Digest.OfImportMapIn(await File.ReadAllTextAsync(Path.Combine(outputDir, "wwwroot", "index.html"))));
+        (await container.FileExistsAsync(hashFile)).IsTrue();
+        var written = (await container.ReadTextAsync(hashFile)).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Single();
+        written.Is(Digest.OfImportMapIn(await container.ReadTextAsync($"{outputDir}/wwwroot/index.html")));
     }
 }

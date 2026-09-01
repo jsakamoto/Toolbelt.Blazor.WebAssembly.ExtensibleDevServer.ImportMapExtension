@@ -1,6 +1,4 @@
 using ImportMapExtension.Test.Internals;
-using Toolbelt;
-using Toolbelt.Diagnostics;
 
 namespace ImportMapExtension.Test;
 
@@ -9,34 +7,49 @@ namespace ImportMapExtension.Test;
 /// collocated JavaScript module, reload without rebuilding, and have a real browser accept both the
 /// module and the strict policy around the import map.
 /// <para>
-/// Every test here works on a copy of the solution, so editing the sample app's sources never
-/// touches the working tree.
+/// The app runs in a disposable container, so nothing any of this does reaches the working tree or
+/// the NuGet cache of the machine running it. The browser runs here rather than in that container:
+/// Playwright brings its own, and the development server is reachable from here through the port
+/// the container publishes.
 /// </para>
 /// </summary>
-[Parallelizable(ParallelScope.None)]
+[Parallelizable(ParallelScope.Self)]
 public class DevServerE2ETests
 {
     private const string OriginalModule = "export const greeting = () => \"Hello, Blazor!\";\n";
 
     private const string EditedModule = "export const greeting = () => \"Edited without a rebuild!\";\n";
 
+    private const string ModulePath = $"{SolutionContainer.SolutionDir}/SampleApp/App.razor.js";
+
+    /// <summary>
+    /// The development server that the tests which ask nothing special of the build share. The two
+    /// that turn a half of this package off need a build of their own, so they start their own.
+    /// </summary>
+    private SolutionContainer _DevServer = null!;
+
+    [OneTimeSetUp]
+    public async Task StartTheDevelopmentServer() => this._DevServer = await SolutionContainer.StartDevServerAsync();
+
+    [OneTimeTearDown]
+    public async Task DisposeTheDevelopmentServer() => await this._DevServer.DisposeAsync();
+
     [Test]
     public async Task EditingAModuleAndReloadingWorks()
     {
-        var browser = HeadlessBrowser.Require();
-
-        await using var app = await DevServer.StartAsync();
+        // Whatever else has run against this server, the module is what the working tree has in it.
+        await WriteModuleAsync(this._DevServer, OriginalModule);
 
         // The app works as it stands: it renders, nothing is blocked, nothing is logged.
-        var before = await HeadlessBrowser.LoadAsync(browser, app.BaseAddress);
+        var before = await HeadlessBrowser.LoadAsync(this._DevServer.BaseAddress);
         before.CspViolations.Is([], message: $"The browser blocked something.\n{before.Describe()}");
         before.ConsoleErrors.Is([], message: $"The browser reported an error.\n{before.Describe()}");
         before.Greeting.Is("Hello, Blazor!", message: before.Describe());
 
         // Edit the module. No rebuild, no restart. This is what breaks without this package.
-        await app.WriteModuleAsync(EditedModule);
+        await WriteModuleAsync(this._DevServer, EditedModule);
 
-        var after = await HeadlessBrowser.LoadAsync(browser, app.BaseAddress);
+        var after = await HeadlessBrowser.LoadAsync(this._DevServer.BaseAddress);
         after.CspViolations.Is([], message: $"The browser blocked something after the edit.\n{after.Describe()}");
         after.ConsoleErrors.Is([], message: $"The browser reported an error after the edit.\n{after.Describe()}");
         after.ImportResult.Is("IMPORT OK: Edited without a rebuild!", message: after.Describe());
@@ -50,12 +63,10 @@ public class DevServerE2ETests
     [Test]
     public async Task WithoutTheIntegrityRemovalTheEditedModuleIsBlocked()
     {
-        var browser = HeadlessBrowser.Require();
+        await using var devServer = await SolutionContainer.StartDevServerAsync("-p:ImportMapStripIntegrity=false");
+        await WriteModuleAsync(devServer, EditedModule);
 
-        await using var app = await DevServer.StartAsync("-p:ImportMapStripIntegrity=false");
-        await app.WriteModuleAsync(EditedModule);
-
-        var report = await HeadlessBrowser.LoadAsync(browser, app.BaseAddress);
+        var report = await HeadlessBrowser.LoadAsync(devServer.BaseAddress);
 
         report.ImportResult.StartsWith("IMPORT FAILED").IsTrue(message: $"The module was expected to be blocked.\n{report.Describe()}");
         report.ConsoleErrors.Any(e => e.Contains("integrity", StringComparison.OrdinalIgnoreCase))
@@ -69,12 +80,10 @@ public class DevServerE2ETests
     [Test]
     public async Task WithoutTheDigestBeingWrittenTheImportMapIsBlocked()
     {
-        var browser = HeadlessBrowser.Require();
-
         // A token the page does not contain leaves "sha256-{importmap}" standing in the policy.
-        await using var app = await DevServer.StartAsync("-p:ImportMapCspPlaceholder=@@never@@");
+        await using var devServer = await SolutionContainer.StartDevServerAsync("-p:ImportMapCspPlaceholder=@@never@@");
 
-        var report = await HeadlessBrowser.LoadAsync(browser, app.BaseAddress);
+        var report = await HeadlessBrowser.LoadAsync(devServer.BaseAddress);
 
         report.CspViolations.IsNot([], message: $"The import map was expected to be blocked.\n{report.Describe()}");
     }
@@ -82,8 +91,7 @@ public class DevServerE2ETests
     [Test]
     public async Task EveryRouteThatAnswersWithTheDocumentCarriesAMatchingPolicy()
     {
-        await using var app = await DevServer.StartAsync();
-        using var http = new HttpClient { BaseAddress = new Uri(app.BaseAddress) };
+        using var http = new HttpClient { BaseAddress = new Uri(this._DevServer.BaseAddress) };
 
         foreach (var path in new[] { "/", "/index.html", "/some/deep/link" })
         {
@@ -100,75 +108,18 @@ public class DevServerE2ETests
     [Test]
     public async Task ACompressionAwareClientGetsTheSameRewrittenDocument()
     {
-        await using var app = await DevServer.StartAsync();
         using var handler = new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All };
-        using var http = new HttpClient(handler) { BaseAddress = new Uri(app.BaseAddress) };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(this._DevServer.BaseAddress) };
 
         var html = await http.GetStringAsync("/index.html");
 
         Digest.InPolicyOf(html).Is(Digest.OfImportMapIn(html));
     }
 
-    /// <summary>The sample app running from a throwaway copy of the solution.</summary>
-    private sealed class DevServer : IAsyncDisposable
+    private static async Task WriteModuleAsync(SolutionContainer devServer, string content)
     {
-        private readonly WorkDirectory _Workspace;
-        private readonly XProcess _Process;
-
-        public string BaseAddress { get; }
-
-        private string ModulePath => Path.Combine(this._Workspace, "SampleApp", "App.razor.js");
-
-        private DevServer(WorkDirectory workspace, XProcess process, string baseAddress)
-        {
-            this._Workspace = workspace;
-            this._Process = process;
-            this.BaseAddress = baseAddress;
-        }
-
-        public static async Task<DevServer> StartAsync(string extraArguments = "")
-        {
-            var workspace = await PackagedSolution.CreateWorkspaceAsync();
-            var port = HeadlessBrowser.GetFreePort();
-            var baseAddress = $"http://127.0.0.1:{port}/";
-
-            // The development server reads this, and a child process inherits it.
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", baseAddress.TrimEnd('/'));
-            try
-            {
-                var process = XProcess.Start("dotnet",
-                    $"run --project \"{Path.Combine(workspace, "SampleApp", "SampleApp.csproj")}\" --no-launch-profile " +
-                    $"-p:ImportMapExtensionVersion={PackagedSolution.PackageVersion} {extraArguments} -nodeReuse:false",
-                    workspace);
-
-                var listening = await process.WaitForOutputAsync(line => line.Contains("Now listening on"), 300000);
-                if (!listening)
-                {
-                    process.Dispose();
-                    workspace.Dispose();
-                    Assert.Fail($"The development server never started listening.\n{process.Output}");
-                }
-
-                return new DevServer(workspace, process, baseAddress);
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null);
-            }
-        }
-
-        public async Task WriteModuleAsync(string content)
-        {
-            await File.WriteAllTextAsync(this.ModulePath, content);
-            // Give the file watchers a moment to settle before the page is loaded again.
-            await Task.Delay(TimeSpan.FromSeconds(2));
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            this._Process.Dispose();
-            this._Workspace.Dispose();
-            return ValueTask.CompletedTask;
-        }
+        await devServer.WriteTextAsync(ModulePath, content);
+        // Give the file watchers a moment to settle before the page is loaded again.
+        await Task.Delay(TimeSpan.FromSeconds(2));
     }
 }

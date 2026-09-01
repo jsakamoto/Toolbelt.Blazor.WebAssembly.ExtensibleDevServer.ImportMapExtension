@@ -5,11 +5,15 @@ namespace ImportMapExtension.Test;
 /// <summary>
 /// A placeholder that is never replaced produces an app that no browser can start. These cover the
 /// ways that could happen, and check that each one is reported rather than shipped.
+/// <para>
+/// Each test builds in a disposable container of its own. They ask for different things of the same
+/// project, and a build that reuses what the one before it left in "obj" is not the build that is
+/// being described here.
+/// </para>
 /// </summary>
+[Parallelizable(ParallelScope.All)]
 public class GuardrailTests
 {
-    private static string SampleAppProject => Path.Combine(PathUtils.SolutionDir, "SampleApp", "SampleApp.csproj");
-
     /// <summary>
     /// The build leaves the placeholder alone on purpose: the development server extension fills it
     /// in as the page is served, from the content that ships after the "integrity" member is
@@ -18,18 +22,14 @@ public class GuardrailTests
     [Test]
     public async Task BuildingLeavesThePlaceholderInPlace()
     {
-        await PackagedSolution.PackAsync();
-
-        var outputDir = Path.Combine(PackagedSolution.WorkRoot, "build-only");
-        await PackagedSolution.RunAsync("dotnet",
-            $"build \"{SampleAppProject}\" -c Release -o \"{outputDir}\" -p:ImportMapExtensionVersion={PackagedSolution.PackageVersion}");
+        await using var container = await SolutionContainer.StartAsync();
+        await container.DotNetAsync($"build {SolutionContainer.SampleAppProject} -c Release");
 
         // The build never copies index.html to "bin"; the served copy is the SDK's intermediate one.
-        var generated = Directory
-            .GetFiles(Path.Combine(PathUtils.SolutionDir, "SampleApp", "obj", "Release", "net10.0", "staticwebassets", "htmlassetplaceholders", "build"), "*.html")
-            .Single();
+        var generated = (await container.GlobAsync(
+            $"{SolutionContainer.SolutionDir}/SampleApp/obj/Release/net10.0/staticwebassets/htmlassetplaceholders/build/*.html")).Single();
 
-        var html = await File.ReadAllTextAsync(generated);
+        var html = await container.ReadTextAsync(generated);
         html.Contains("'sha256-{importmap}'").IsTrue(message: "The build was expected to leave the placeholder for the development server extension.");
         Digest.ImportMapOf(html).Contains("\"integrity\"").IsTrue(message: "The build was expected to leave the import map as the SDK wrote it.");
     }
@@ -37,17 +37,15 @@ public class GuardrailTests
     [Test]
     public async Task PublishingWithoutImportMapGenerationFailsWithAnExplanation()
     {
-        await PackagedSolution.PackAsync();
+        await using var container = await SolutionContainer.StartAsync();
 
-        var outputDir = Path.Combine(PackagedSolution.WorkRoot, "no-importmap");
-        var process = await PackagedSolution.RunAsync("dotnet",
-            $"build \"{SampleAppProject}\" -c Release -o \"{outputDir}\" " +
-            $"-p:ImportMapExtensionVersion={PackagedSolution.PackageVersion} -p:OverrideHtmlAssetPlaceholders=false",
+        var result = await container.DotNetAsync(
+            $"build {SolutionContainer.SampleAppProject} -c Release -p:OverrideHtmlAssetPlaceholders=false",
             allowFailure: true);
 
-        process.ExitCode.IsNot(0, message: $"The build was expected to fail.\n{process.Output}");
-        process.Output.Contains("IMCSP001").IsTrue(message: process.Output);
-        process.Output.Contains("OverrideHtmlAssetPlaceholders").IsTrue(message: process.Output);
+        result.ExitCode.IsNot(0L, message: $"The build was expected to fail.\n{result.Output}");
+        result.Output.Contains("IMCSP001").IsTrue(message: result.Output);
+        result.Output.Contains("OverrideHtmlAssetPlaceholders").IsTrue(message: result.Output);
     }
 
     /// <summary>
@@ -57,40 +55,41 @@ public class GuardrailTests
     [Test]
     public async Task BuildingWithoutTheDevServerWarns()
     {
-        await PackagedSolution.PackAsync();
+        await using var container = await SolutionContainer.StartAsync();
 
-        using var workspace = await PackagedSolution.CreateWorkspaceAsync();
-        var project = Path.Combine(workspace, "SampleApp", "SampleApp.csproj");
-        var text = await File.ReadAllTextAsync(project);
-        await File.WriteAllTextAsync(project, text.Replace(
-            "<PackageReference Include=\"Toolbelt.Blazor.WebAssembly.ExtensibleDevServer\" Version=\"$(ExtensibleDevServerVersion)\" PrivateAssets=\"all\" />", ""));
+        const string project = SolutionContainer.SampleAppProject;
+        var withDevServer = await container.ReadTextAsync(project);
+        var withoutDevServer = withDevServer.Replace(
+            "<PackageReference Include=\"Toolbelt.Blazor.WebAssembly.ExtensibleDevServer\" Version=\"$(ExtensibleDevServerVersion)\" PrivateAssets=\"all\" />", "");
+        withoutDevServer.IsNot(withDevServer, message: "The reference to remove was not found in the sample app's project file.");
+        await container.WriteTextAsync(project, withoutDevServer);
 
-        var process = await PackagedSolution.RunAsync("dotnet",
-            $"build \"{project}\" -c Release -p:ImportMapExtensionVersion={PackagedSolution.PackageVersion}",
-            workingDirectory: workspace);
+        var result = await container.DotNetAsync($"build {project} -c Release");
 
-        process.Output.Contains("IMCSP004").IsTrue(message: process.Output);
+        result.Output.Contains("IMCSP004").IsTrue(message: result.Output);
     }
 
     [Test]
     public async Task BuildingWithTheDevServerDoesNotWarn()
     {
-        await PackagedSolution.PackAsync();
+        await using var container = await SolutionContainer.StartAsync();
 
-        var process = await PackagedSolution.RunAsync("dotnet",
-            $"build \"{SampleAppProject}\" -c Release -p:ImportMapExtensionVersion={PackagedSolution.PackageVersion}");
+        var result = await container.DotNetAsync($"build {SolutionContainer.SampleAppProject} -c Release");
 
-        process.Output.Contains("IMCSP004").IsFalse(message: process.Output);
+        result.Output.Contains("IMCSP004").IsFalse(message: result.Output);
     }
 
     /// <summary>Turning the policy work off is a deliberate choice, so it does not fail the build.</summary>
     [Test]
     public async Task TurningThePolicyWorkOffLeavesThePlaceholderAndDoesNotFailThePublish()
     {
-        var outputDir = Path.Combine(PackagedSolution.WorkRoot, "csp-disabled");
-        await PackagedSolution.PublishSampleAppAsync(outputDir, "-p:ImportMapCspEnabled=false");
+        const string outputDir = $"{SolutionContainer.SolutionDir}/_publish-csp-disabled";
 
-        var html = await File.ReadAllTextAsync(Path.Combine(outputDir, "wwwroot", "index.html"));
+        await using var container = await SolutionContainer.StartAsync();
+        await container.DotNetAsync(
+            $"publish {SolutionContainer.SampleAppProject} -c Release -o {outputDir} -p:ImportMapCspEnabled=false");
+
+        var html = await container.ReadTextAsync($"{outputDir}/wwwroot/index.html");
         html.Contains("'sha256-{importmap}'").IsTrue();
     }
 }

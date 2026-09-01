@@ -18,12 +18,20 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      # The end-to-end tests drive whatever Chromium they find, and skip themselves when there is none.
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@v2
-        id: setup-chrome
+      # The end-to-end tests drive a Chromium that Playwright downloads the first time they run.
+      # Keeping it between runs saves that download. The key follows the test project file, because
+      # that is what says which version of Playwright, and so which browser, the tests need.
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('ImportMapExtension.Test/ImportMapExtension.Test.csproj') }}
+
+      # Every test that builds, publishes or runs the sample app does so in a container, which is
+      # what keeps them out of the NuGet cache of the machine they run on. Pulling the image here
+      # rather than letting the first of them wait for it keeps the reason for a slow start visible.
+      - name: Pull the .NET SDK image the tests build in
+        run: docker pull mcr.microsoft.com/dotnet/sdk:10.0.400
 
       - name: Perform tests
-        env:
-          CSP_TEST_BROWSER: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: dotnet test --project ./ImportMapExtension.Test/ImportMapExtension.Test.csproj --output detailed

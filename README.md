@@ -192,11 +192,20 @@ reports that instead of shipping it.
 
 ## Working on this package
 
-`dotnet test` packs the package, publishes the sample app with it, and checks what a static host
-would serve. If a Chromium is installed, it also runs the sample app the way you would. It edits a
-module, reloads, and checks that a real browser accepts both the module and the policy. It also
-checks that the same app fails when either half is turned off. Point `CSP_TEST_BROWSER` at a browser
-to choose which one.
+`dotnet test` packs the package once, publishes the sample app with it, and checks what a static host
+would serve. It also runs the sample app the way you would, edits a module, reloads, and checks that
+a real browser accepts both the module and the policy, and that the same app fails when either half
+is turned off.
+
+Everything that builds, publishes or runs the sample app does so inside a disposable Linux container,
+so **you need Docker running**. Each one mounts your working tree read only, copies what a build
+reads out of it, and builds in that copy, so nothing a test does can reach your files. The container
+also has a NuGet package cache of its own, which is what lets the tests pack the same version over
+and over without the package cache on your machine handing an older copy of it back.
+
+The browser runs on your machine rather than in that container. Playwright downloads a Chromium of
+its own the first time the tests run and finds it again afterwards, so nothing has to be installed
+for this, and whichever browsers you happen to have are left alone.
 
 MSBuild keeps task assemblies loaded in its worker processes. If a rebuild fails with "access to the
 path is denied", run `dotnet build-server shutdown`.

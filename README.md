@@ -52,18 +52,22 @@ component and no such guidance.
 
 ## What this package does
 
-This package does two things about import maps.
+This package bundles a development server extension and an MSBuild target. The extension rewrites
+the Blazor development server's response on the fly. The target runs at build and publish time.
+Together, these two parts solve the problems above in two ways.
 
-The first thing only runs while you develop. The development server extension removes the
-`integrity` member from the import map before it sends the page. This lets you edit a JavaScript
-module and reload the page without a rebuild. Publish never does this. The import map you ship
-still has its `integrity`.
+### Removing `integrity` from the import map while you develop
 
-The second thing writes a digest into your Content Security Policy. It replaces the
-`sha256-{importmap}` placeholder with the real hash of the import map body. This runs both while
-you develop and when you publish. While you develop, it computes the hash after the `integrity`
-member is removed, so the digest always matches what the browser actually gets. This is what lets
-you drop `'unsafe-inline'` from your script policy.
+The development server extension removes the `integrity` member from the import map before it sends
+the page. This lets you edit a JavaScript module and reload the page without a rebuild. Publish never
+does this. The import map you ship still has its `integrity`.
+
+### Writing the import map's digest into your Content Security Policy
+
+This part replaces the `sha256-{importmap}` placeholder with the real hash of the import map body. It
+runs both while you develop and when you publish. While you develop, it computes the hash after the
+`integrity` member is removed, so the digest always matches what the browser actually gets. This is
+what lets you drop `'unsafe-inline'` from your script policy.
 
 These two things must live in one package. Removing `integrity` changes the import map, so it also
 changes its hash. Whoever removes `integrity` has to be the one who writes the digest.

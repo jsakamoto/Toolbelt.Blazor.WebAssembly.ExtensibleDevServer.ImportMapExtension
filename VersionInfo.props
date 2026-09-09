@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
-    <ExtensibleDevServerVersion>10.0.11</ExtensibleDevServerVersion>
-    <ImportMapExtensionVersion>10.0.11</ImportMapExtensionVersion>
+    <ExtensibleDevServerVersion>10.0.12</ExtensibleDevServerVersion>
+    <ImportMapExtensionVersion>10.0.12</ImportMapExtensionVersion>
     <Copyright>Copyright © 2026 J.Sakamoto, Mozilla Public License 2.0</Copyright>
     <Authors>J.Sakamoto</Authors>
     <RepositoryType>git</RepositoryType>

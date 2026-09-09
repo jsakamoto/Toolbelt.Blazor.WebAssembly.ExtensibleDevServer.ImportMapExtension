@@ -17,6 +17,10 @@ public class AssemblySetup
         var distDir = Path.Combine(PathUtils.SolutionDir, "_dist");
         Directory.GetFiles(distDir, "*.nupkg").ToList().ForEach(File.Delete);
 
+        // Whatever somebody built by hand goes in next, so that a package this repository depends
+        // on but does not build is restored from here rather than from nuget.org.
+        LocalPackages.CopyToLocalFeed();
+
         // Neither of these needs the other, and on a machine that has done neither before, the
         // browser is a download and the package is a build.
         await Task.WhenAll(

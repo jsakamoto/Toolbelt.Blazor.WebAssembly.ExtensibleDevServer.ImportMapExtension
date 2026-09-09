@@ -39,8 +39,12 @@ internal sealed class SolutionContainer : IAsyncDisposable
     /// <summary>Where the working tree is mounted, read only, for the copy above to be made from.</summary>
     private const string SourceDir = "/src";
 
-    /// <summary>Folder names that hold nothing a build reads, wherever in the tree they turn up.</summary>
-    private static readonly string[] NotWorthCopying = ["bin", "obj", ".vs", ".git", "TestResults"];
+    /// <summary>
+    /// Folder names that hold nothing a build reads, wherever in the tree they turn up. The folder
+    /// that locally built packages are dropped into is one of them, because everything in it has
+    /// already been copied into "_dist" by the time a container starts.
+    /// </summary>
+    private static readonly string[] NotWorthCopying = ["bin", "obj", ".vs", ".git", "TestResults", LocalPackages.FolderName];
 
     /// <summary>Where that copy is staged. It is deleted as soon as it has been unpacked.</summary>
     private const string ArchivePath = "/tmp/solution.tar";

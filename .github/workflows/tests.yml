@@ -31,7 +31,7 @@ jobs:
       # what keeps them out of the NuGet cache of the machine they run on. Pulling the image here
       # rather than letting the first of them wait for it keeps the reason for a slow start visible.
       - name: Pull the .NET SDK image the tests build in
-        run: docker pull mcr.microsoft.com/dotnet/sdk:10.0.400
+        run: docker pull mcr.microsoft.com/dotnet/sdk:10.0.402
 
       - name: Perform tests
         run: dotnet test --project ./ImportMapExtension.Test/ImportMapExtension.Test.csproj --output detailed

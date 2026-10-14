@@ -1,3 +1,6 @@
+v.10.0.13
+- Improve: Aligned the version number with the Toolbelt.Blazor.WebAssembly.ExtensibleDevServer package. This release contains no functional changes.
+
 v.10.0.12
 - Improve: Aligned the version number with the Toolbelt.Blazor.WebAssembly.ExtensibleDevServer package. This release contains no functional changes.
 

@@ -18,6 +18,20 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # Add an additional NuGet package source (configured via the "ADDITIONAL_NUGET_SOURCE_URL" repository
+      # variable and the "ADDITIONAL_NUGET_SOURCE_TOKEN" repository secret; skipped if either one is not set)
+      - name: Add additional NuGet source
+        env:
+          SOURCE_URL: ${{ vars.ADDITIONAL_NUGET_SOURCE_URL }}
+          SOURCE_USERNAME: ${{ github.repository_owner }}
+          SOURCE_TOKEN: ${{ secrets.ADDITIONAL_NUGET_SOURCE_TOKEN }}
+        run: |
+          if [ -z "$SOURCE_URL" ] || [ -z "$SOURCE_TOKEN" ]; then
+            echo "The additional NuGet package source is not configured, so this step is skipped."
+            exit 0
+          fi
+          dotnet nuget add source "$SOURCE_URL" --name "AdditionalNuGetSource" --username "$SOURCE_USERNAME" --password "$SOURCE_TOKEN" --store-password-in-clear-text --configfile nuget.config
+
       # The end-to-end tests drive a Chromium that Playwright downloads the first time they run.
       # Keeping it between runs saves that download. The key follows the test project file, because
       # that is what says which version of Playwright, and so which browser, the tests need.

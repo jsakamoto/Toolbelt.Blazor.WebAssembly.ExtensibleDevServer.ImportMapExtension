@@ -26,7 +26,7 @@ internal sealed class SolutionContainer : IAsyncDisposable
     /// The SDK to build with. This package hooks into the step of the .NET SDK that generates import
     /// maps, and 10.0.400 is the first SDK to have it.
     /// </summary>
-    private const string SdkImage = "mcr.microsoft.com/dotnet/sdk:10.0.402";
+    private const string SdkImage = "mcr.microsoft.com/dotnet/sdk:10.0.403";
 
     /// <summary>Where the copy of the solution that gets built lives inside the container.</summary>
     public const string SolutionDir = "/work";
